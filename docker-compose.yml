@@ -3,17 +3,23 @@ services:
     image: memgraph/memgraph-mage:latest
     container_name: memgraph-mage
     ports:
-      - "7687:7687"
-      - "7444:7444"
-    command: ["--log-level=TRACE"]
+      - "${BOLT_PORT}:${BOLT_PORT}"
+      - "${DB_HTTPS_PORT}:${DB_HTTPS_PORT}"
+    healthcheck:
+      test: [ "CMD-SHELL", "echo 'RETURN 0;' | mgconsole || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 0s
+    command: ["--log-level=${DB_LOG_LEVEL}"]
 
   lab:
     image: memgraph/lab:latest
     container_name: memgraph-lab
     ports:
-      - "3000:3000"
+      - "${MG_LAB_PORT}:${MG_LAB_PORT}"
     depends_on:
       - memgraph
     environment:
       - QUICK_CONNECT_MG_HOST=memgraph
-      - QUICK_CONNECT_MG_PORT=7687
+      - QUICK_CONNECT_MG_PORT

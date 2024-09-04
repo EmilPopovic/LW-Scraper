@@ -14,6 +14,7 @@ with open(config_path, 'r') as config_file:
 class Post:
     _instances = {}
     _titles = {}
+    _soups = {}
 
     def __new__(cls, post_id: str, *args, **kwargs) -> 'Post':
         if post_id in cls._instances:
@@ -29,9 +30,12 @@ class Post:
             self.id = post_id
             self.url = f'{CONFIG['lw_domain']}/posts/{post_id}'
 
-            self.outgoing_posts: list[str] = []
-            self.incoming_posts: list[str] = []
-            self.outgoing_sequences: list[str] = []
+            self.outgoing_post_urls: list[str] = []
+            self.incoming_post_urls: list[str] = []
+            self.outgoing_sequence_urls: list[str] = []
+
+            self.sequence_id: str | None = None
+            self.is_curated = False
 
             self.visited = False
 
@@ -57,12 +61,13 @@ class Post:
 
         # get real url from link in title
         page_content = await Post.fetch(session, full_url)
-        soup = BeautifulSoup(page_content, 'html.parser')
+        soup = BeautifulSoup(page_content, CONFIG['parser'])
         post_title = soup.find('a', class_='PostsPageTitle-link')
 
         real_url = Post.strip_title_from_url(f'{CONFIG['lw_domain']}{post_title['href']}')
         post_id = Post.id_from_url(real_url)
         Post._titles[post_id] = post_title.text
+        Post._soups[post_id] = soup
 
         return real_url
 
@@ -82,7 +87,9 @@ class Post:
 
             page_content = await self.fetch(session, self.url)
 
-            soup = BeautifulSoup(page_content, 'html.parser')
+            cached_soup = Post._soups.get(self.id)
+            soup = cached_soup if cached_soup is not None else BeautifulSoup(page_content, CONFIG['parser'])
+
             post_body = soup.find('div', class_='InlineReactSelectionWrapper-root')
 
             paragraphs = post_body.find_all('p')
@@ -98,11 +105,11 @@ class Post:
             tasks = [Post.get_real_url(session, link) for link in lw_links]
             results = await asyncio.gather(*tasks)
 
-            self.outgoing_posts = [link for link in results
-                                   if ('/posts/' in link or '/s/' in link and '/p/' in link or '/lw/' in link)
-                                   and '/comment/' not in link]
+            self.outgoing_post_urls = [link for link in results
+                                       if ('/posts/' in link or '/s/' in link and '/p/' in link or '/lw/' in link)
+                                       and '/comment/' not in link]
 
-            self.outgoing_sequences = [link for link in lw_links if '/s/' in link and '/p/' not in link]
+            self.outgoing_sequence_urls = [link for link in lw_links if '/s/' in link and '/p/' not in link]
 
             pingbacks_div = soup.find('div', class_='PingbacksList-list')
 
@@ -113,8 +120,8 @@ class Post:
                 tasks = [Post.get_real_url(session, link) for link in pingbacks]
                 results = await asyncio.gather(*tasks)
 
-                self.incoming_posts = [link for link in results
-                                       if '/posts/' in link or '/s/' in link and '/p/' in link]
+                self.incoming_post_urls = [link for link in results
+                                           if '/posts/' in link or '/s/' in link and '/p/' in link]
 
     def __eq__(self, other) -> bool:
         return self.id == other.id
