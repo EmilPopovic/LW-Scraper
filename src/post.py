@@ -74,7 +74,7 @@ class Post:
     def id_from_url(url: str) -> str:
         return url.split('/')[-1]
 
-    async def visit(self) -> dict[str, list[str]]:
+    async def visit(self) -> None:
         print(f'Visiting {self}')
         self.visited = True
 
@@ -115,12 +115,6 @@ class Post:
 
                 self.incoming_posts = [link for link in results
                                        if '/posts/' in link or '/s/' in link and '/p/' in link]
-
-            return {
-                'outgoing_links': self.outgoing_posts,
-                'incoming_links': self.incoming_posts,
-                'outgoing_sequences': self.outgoing_sequences
-            }
 
     def __eq__(self, other) -> bool:
         return self.id == other.id
