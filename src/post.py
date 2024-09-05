@@ -95,15 +95,12 @@ class Post:
 
             post_body = soup.find('div', class_='InlineReactSelectionWrapper-root')
 
-            paragraphs = post_body.find_all('p')
-
             lw_links = [link['href'].split('?')[0].split('#')[0]
-                        for paragraph in paragraphs
+                        for paragraph in post_body.find_all('p')
                         for link in paragraph.find_all('a')
-                        if link.get('href') and (link['href'].startswith(f'{CONFIG['lw_domain']}')
-                                                 or link['href'].startswith('/posts/')
-                                                 or link['href'].startswith('/s/')
-                                                 or link['href'].startswith('/lw/'))]
+                        if link.get('href') and any(link['href'].startswith(p)
+                                                    for p in
+                                                    [f'{CONFIG['lw_domain']}', '/posts/', '/s/', '/lw/'])]
 
             tasks = [Post.get_real_url(session, link) for link in lw_links]
             results = await asyncio.gather(*tasks)
