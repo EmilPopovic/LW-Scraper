@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+from datetime import datetime
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -38,6 +39,7 @@ class Post:
             self.is_curated = False
 
             self.visited = False
+            self.last_visited_at: datetime | None = None
 
             self.title = override_title if override_title else Post._titles.get(post_id)
 
@@ -82,6 +84,7 @@ class Post:
     async def visit(self) -> None:
         print(f'Visiting {self}')
         self.visited = True
+        self.last_visited_at = datetime.now()
 
         async with aiohttp.ClientSession(headers=CONFIG['headers']) as session:
 
