@@ -6,6 +6,8 @@ from datetime import datetime
 import aiohttp
 from bs4 import BeautifulSoup
 
+from util import default_soup
+
 config_path = os.path.join(os.path.dirname(__file__), '..', 'CONFIG.json')
 
 with open(config_path, 'r') as config_file:
@@ -13,9 +15,9 @@ with open(config_path, 'r') as config_file:
 
 
 class Post:
-    _instances = {}
-    _titles = {}
-    _soups = {}
+    _instances: dict[str, 'Post'] = {}
+    _titles: dict[str, str] = {}
+    _soups: dict[str, BeautifulSoup] = {}
 
     def __new__(cls, post_id: str, *args, **kwargs) -> 'Post':
         if post_id in cls._instances:
@@ -35,38 +37,38 @@ class Post:
             self.incoming_post_urls: list[str] = []
             self.outgoing_sequence_urls: list[str] = []
 
-            self.sequence_id: str | None = None
+            self.sequence_title: str | None = None
+            self.sequence_url: str | None = None
+            self.sequence_prev_url: str | None = None
+            self.sequence_next_url: str | None = None
+
             self.is_curated = False
 
             self.visited = False
             self.last_visited_at: datetime | None = None
 
-            self.title = override_title if override_title else Post._titles.get(post_id)
-
-    @staticmethod
-    async def fetch(session: aiohttp.ClientSession, url: str) -> str:
-        async with session.get(url) as response:
-            return await response.text()
+            self.title = override_title if override_title else Post._titles[post_id]
 
     @staticmethod
     async def get_real_url(session: aiohttp.ClientSession, url: str) -> str:
         # add https://www.lesswrong.com to start if not present
         full_url = url if url.startswith(CONFIG['lw_domain']) else f'{CONFIG['lw_domain']}{url}'
 
-        # already is real url
-        if '/posts/' in full_url:
-            return Post.strip_title_from_url(full_url)
-
         # is a link to a sequence
-        elif '/s/' in full_url and '/p/' not in full_url:
+        if '/s/' in full_url and '/p/' not in full_url:
             return full_url
 
         # get real url from link in title
-        page_content = await Post.fetch(session, full_url)
-        soup = BeautifulSoup(page_content, CONFIG['parser'])
+        soup = await default_soup(session, full_url)
+
         post_title = soup.find('a', class_='PostsPageTitle-link')
 
-        real_url = Post.strip_title_from_url(f'{CONFIG['lw_domain']}{post_title['href']}')
+        if post_title:
+            real_url = Post.strip_title_from_url(f'{CONFIG['lw_domain']}{post_title['href']}')
+        else:
+            real_url = f'{CONFIG["lw_domain"]}{Post.id_from_url(full_url)}'
+            post_title = soup.find('h1', class_='PostsPageSplashHeader-title')
+
         post_id = Post.id_from_url(real_url)
         Post._titles[post_id] = post_title.text
         Post._soups[post_id] = soup
@@ -81,17 +83,15 @@ class Post:
     def id_from_url(url: str) -> str:
         return url.split('/')[-1]
 
-    async def visit(self) -> None:
+    async def visit(self, force_revisit: bool = False) -> None:
         print(f'Visiting {self}')
         self.visited = True
         self.last_visited_at = datetime.now()
 
         async with aiohttp.ClientSession(headers=CONFIG['headers']) as session:
 
-            page_content = await self.fetch(session, self.url)
-
-            cached_soup = Post._soups.get(self.id)
-            soup = cached_soup if cached_soup is not None else BeautifulSoup(page_content, CONFIG['parser'])
+            cached = Post._soups.get(self.id)
+            soup = cached if cached and not force_revisit else await default_soup(session, self.url)
 
             post_body = soup.find('div', class_='InlineReactSelectionWrapper-root')
 
@@ -106,7 +106,9 @@ class Post:
             results = await asyncio.gather(*tasks)
 
             self.outgoing_post_urls = [link for link in results
-                                       if ('/posts/' in link or '/s/' in link and '/p/' in link or '/lw/' in link)
+                                       if ('/posts/' in link or
+                                           ('/s/' in link and '/p/' in link)
+                                           or '/lw/' in link)
                                        and '/comment/' not in link]
 
             self.outgoing_sequence_urls = [link for link in lw_links if '/s/' in link and '/p/' not in link]
@@ -121,7 +123,26 @@ class Post:
                 results = await asyncio.gather(*tasks)
 
                 self.incoming_post_urls = [link for link in results
-                                           if '/posts/' in link or '/s/' in link and '/p/' in link]
+                                           if '/posts/' in link or ('/s/' in link and '/p/' in link)]
+
+            sequence = soup.find('div', class_='PostsTopSequencesNav-title')
+
+            if sequence:
+                sequence_title_a = soup.find('a')
+                self.sequence_title = sequence_title_a.text
+                self.sequence_url = f'{CONFIG['lw_domain']}{sequence_title_a['href']}'
+
+            sequence_nav = soup.find('div', class_='BottomNavigation-root')
+
+            if sequence_nav:
+                prev_post = sequence_nav.find('a', class_='BottomNavigation-post BottomNavigation-prevPost')
+                next_post = sequence_nav.find('a', class_='BottomNavigation-post BottomNavigation-nextPost')
+
+                if prev_post:
+                    self.sequence_prev_url = Post.get_real_url(session, prev_post['href'])
+
+                if next_post:
+                    self.sequence_next_url = Post.get_real_url(session, next_post['href'])
 
     def __eq__(self, other) -> bool:
         return self.id == other.id

@@ -26,6 +26,7 @@ class DB:
         with GraphDatabase.driver(self.uri, auth=self.auth) as client:
             query = '''
             MERGE (n:Post {id: $post_id})
+            ON MATCH SET n.title = $title
             ON CREATE SET n.title = $title
             RETURN CASE WHEN n.title = $title THEN true ELSE false END AS was_created
             '''
@@ -93,3 +94,38 @@ class DB:
     @dispatch(Sequence)
     def create_sequence(self, sequence: Sequence) -> None:
         self.create_sequence(sequence.title, sequence.id)
+
+    def link_sequence_chapters(self, sequence: Sequence, chapters: list[Post]) -> None:
+        with GraphDatabase.driver(self.uri, auth=self.auth) as client:
+            query = '''
+            UNWIND $chapters AS chapter
+            MERGE (c:Post {id: chapter.id})
+            ON CREATE SET c.title = chapter.title
+            WITH c, chapter.order AS order
+            ORDER BY order
+            WITH COLLECT(c) AS sortedChapters
+            WITH sortedChapters, sortedChapters[0] AS firstChapter, sortedChapters[-1] AS lastChapter
+            MERGE (s:Sequence {id: $sequence_id})
+            MERGE (s)-[:BEGINS_WITH]->(firstChapter)
+            SET firstChapter:SequenceStart
+            MERGE (s)-[:ENDS_WITH]->(lastChapter)
+            SET lastChapter:SequenceEnd
+            FOREACH (i IN RANGE(0, SIZE(sortedChapters) - 2) |
+                MERGE (sortedChapters[i])-[:CONTINUES_TO]->(sortedChapters[i + 1])
+            )
+            '''
+            # noinspection PyTypeChecker
+            client.execute_query(query,
+                                 sequence_id=sequence.id,
+                                 chapters=[{"id": chapter.id, "order": i, "title": chapter.title}
+                                           for i, chapter in enumerate(chapters)])
+
+    def link_sequences(self, sequence1: Sequence, sequence2: Sequence) -> None:
+        with GraphDatabase.driver(self.uri, auth=self.auth) as client:
+            query = '''
+            MATCH (s1:Sequence {id: $sequence1_id})-[:ENDS_WITH]->(lastPost:Post)
+            MATCH (s2:Sequence {id: $sequence2_id})-[:BEGINS_WITH]->(firstPost:Post)
+            MERGE (lastPost)-[:CONTINUES_TO]->(firstPost)
+            '''
+            # noinspection PyTypeChecker
+            client.execute_query(query, sequence1_id=sequence1.id, sequence2_id=sequence2.id)
