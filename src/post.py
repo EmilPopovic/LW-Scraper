@@ -50,7 +50,7 @@ class Post:
             self.title = override_title if override_title else Post._titles[post_id]
 
     @staticmethod
-    async def get_real_url(session: aiohttp.ClientSession, url: str) -> str:
+    async def prefetch_url(session: aiohttp.ClientSession, url: str) -> str:
         # add https://www.lesswrong.com to start if not present
         full_url = url if url.startswith(CONFIG['lw_domain']) else f'{CONFIG['lw_domain']}{url}'
 
@@ -58,15 +58,24 @@ class Post:
         if '/s/' in full_url and '/p/' not in full_url:
             return full_url
 
-        # get real url from link in title
+        # load url from parameter
         soup = await default_soup(session, full_url)
 
+        print(f'Prefetching <URL {full_url}>')
+
+        # try to find title object
         post_title = soup.find('a', class_='PostsPageTitle-link')
 
         if post_title:
+            # this is a normal post
             real_url = Post.strip_title_from_url(f'{CONFIG['lw_domain']}{post_title['href']}')
         else:
-            real_url = f'{CONFIG["lw_domain"]}{Post.id_from_url(full_url)}'
+            # this is a post with a fancy heading
+            # make url where the last element is the post id
+            url_without_title = full_url if '/s/' in full_url else Post.strip_title_from_url(full_url)
+            parsed_id = Post.id_from_url(url_without_title)
+
+            real_url = f'{CONFIG["lw_domain"]}/posts/{parsed_id}'
             post_title = soup.find('h1', class_='PostsPageSplashHeader-title')
 
         post_id = Post.id_from_url(real_url)
@@ -98,18 +107,17 @@ class Post:
             lw_links = [link['href'].split('?')[0].split('#')[0]
                         for paragraph in post_body.find_all('p')
                         for link in paragraph.find_all('a')
-                        if link.get('href') and any(link['href'].startswith(p)
-                                                    for p in
-                                                    [f'{CONFIG['lw_domain']}', '/posts/', '/s/', '/lw/'])]
+                        if link.get('href')
+                        and any(link['href'].startswith(p)
+                                for p in [f'{CONFIG['lw_domain']}', '/posts/', '/s/', '/lw/'])
+                        and all(elem not in link
+                                for elem in ['/comment/', '/tag/', '/user/'])]
 
-            tasks = [Post.get_real_url(session, link) for link in lw_links]
+            tasks = [Post.prefetch_url(session, link) for link in lw_links]
             results = await asyncio.gather(*tasks)
 
             self.outgoing_post_urls = [link for link in results
-                                       if ('/posts/' in link or
-                                           ('/s/' in link and '/p/' in link)
-                                           or '/lw/' in link)
-                                       and '/comment/' not in link]
+                                       if ('/posts/' in link or ('/s/' in link and '/p/' in link) or '/lw/' in link)]
 
             self.outgoing_sequence_urls = [link for link in lw_links if '/s/' in link and '/p/' not in link]
 
@@ -119,7 +127,7 @@ class Post:
                 pingbacks = [f'{CONFIG.get('lw_domain')}{pingback.get('href')}'
                              for pingback in pingbacks_div.find_all('a')]
 
-                tasks = [Post.get_real_url(session, link) for link in pingbacks]
+                tasks = [Post.prefetch_url(session, link) for link in pingbacks]
                 results = await asyncio.gather(*tasks)
 
                 self.incoming_post_urls = [link for link in results
@@ -139,10 +147,10 @@ class Post:
                 next_post = sequence_nav.find('a', class_='BottomNavigation-post BottomNavigation-nextPost')
 
                 if prev_post:
-                    self.sequence_prev_url = Post.get_real_url(session, prev_post['href'])
+                    self.sequence_prev_url = Post.prefetch_url(session, prev_post['href'])
 
                 if next_post:
-                    self.sequence_next_url = Post.get_real_url(session, next_post['href'])
+                    self.sequence_next_url = Post.prefetch_url(session, next_post['href'])
 
     def __eq__(self, other) -> bool:
         return self.id == other.id

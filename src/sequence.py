@@ -60,7 +60,7 @@ class Sequence:
 
             post_seq_urls = [post.find('a')['href'] for post in posts]
 
-            tasks = [Post.get_real_url(session, link) for link in post_seq_urls]
+            tasks = [Post.prefetch_url(session, link) for link in post_seq_urls]
             self.post_urls = await asyncio.gather(*tasks)
 
     def __eq__(self, other) -> bool:
