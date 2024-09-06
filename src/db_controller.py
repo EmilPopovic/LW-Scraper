@@ -1,8 +1,8 @@
 from multipledispatch import dispatch
 from neo4j import GraphDatabase
 
-from post import Post
-from sequence import Sequence
+from lw_objects.post import Post
+from lw_objects.sequence import Sequence
 
 
 class DB:

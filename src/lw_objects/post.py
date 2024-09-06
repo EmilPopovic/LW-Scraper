@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 
 from util import default_soup
 
-config_path = os.path.join(os.path.dirname(__file__), '..', 'CONFIG.json')
+config_path = os.path.join(os.path.dirname(__file__), '../..', 'CONFIG.json')
 
 with open(config_path, 'r') as config_file:
     CONFIG = json.load(config_file)
@@ -104,14 +104,15 @@ class Post:
 
             post_body = soup.find('div', class_='InlineReactSelectionWrapper-root')
 
-            lw_links = [link['href'].split('?')[0].split('#')[0]
-                        for paragraph in post_body.find_all('p')
-                        for link in paragraph.find_all('a')
-                        if link.get('href')
-                        and any(link['href'].startswith(p)
-                                for p in [f'{CONFIG['lw_domain']}', '/posts/', '/s/', '/lw/'])
-                        and all(elem not in link
-                                for elem in ['/comment/', '/tag/', '/user/'])]
+            lw_links = [
+                link['href'].split('?')[0].split('#')[0]
+                for paragraph in post_body.find_all('p')
+                for link in paragraph.find_all('a')
+                if link.get('href')
+                   and (link['href'].startswith(CONFIG['lw_domain']) or link['href'].startswith('/'))
+                   and any(allowed in link['href'] for allowed in CONFIG['allowed_uris'])
+                   and not any(ignored in link['href'] for ignored in CONFIG['ignored_uris'])
+            ]
 
             tasks = [Post.prefetch_url(session, link) for link in lw_links]
             results = await asyncio.gather(*tasks)

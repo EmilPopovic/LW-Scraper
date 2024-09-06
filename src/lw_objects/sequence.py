@@ -6,10 +6,10 @@ from datetime import datetime
 import aiohttp
 from bs4 import BeautifulSoup
 
-from post import Post
+from lw_objects.post import Post
 from util import default_soup
 
-config_path = os.path.join(os.path.dirname(__file__), '..', 'CONFIG.json')
+config_path = os.path.join(os.path.dirname(__file__), '../..', 'CONFIG.json')
 
 with open(config_path, 'r') as config_file:
     CONFIG = json.load(config_file)
